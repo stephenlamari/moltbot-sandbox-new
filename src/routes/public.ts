@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, ensureMoltbotGateway } from '../gateway';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -51,6 +51,28 @@ publicRoutes.get('/api/status', async (c) => {
   } catch (err) {
     return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
   }
+});
+
+// POST /googlechat - Google Chat webhook (no auth, uses its own verification)
+publicRoutes.post('/googlechat', async (c) => {
+  const sandbox = c.get('sandbox');
+  const request = c.req.raw;
+  console.log('[WEBHOOK] Forwarding Google Chat webhook to container');
+
+  // Ensure gateway is running before forwarding
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+  } catch (error) {
+    console.error('[WEBHOOK] Failed to start gateway:', error);
+    return c.json({ error: 'Gateway not available' }, 503);
+  }
+
+  const response = await sandbox.containerFetch(request, MOLTBOT_PORT);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 });
 
 // GET /_admin/assets/* - Admin UI static assets (CSS, JS need to load for login redirect)
